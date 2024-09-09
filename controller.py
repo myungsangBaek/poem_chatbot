@@ -1,9 +1,8 @@
 import os
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate
-from langchain.chains import RetrievalQA
-from langchain import hub
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+
 from langchain_pinecone import PineconeVectorStore
 
 
@@ -41,10 +40,22 @@ def get_dictionary_chain():
 def get_qa_chain():
     llm = get_llm()
     retriever = get_retriever()
-    prompt = hub.pull('rlm/rag-prompt')
 
-    qa_chain = RetrievalQA.from_chain_type(
-        llm, retriever=retriever, chain_type_kwargs={'prompt': prompt})
+    contextualize_q_system_prompt = (
+        "Given a chat history and the latest user question"
+    )
+
+    contextualize_q_prompt = ChatPromptTemplate.from_message(
+        [
+            ("system", contextualize_q_system_prompt),
+            MessagesPlaceholder("chat_history"),
+            ("human", "{input}")
+        ]
+    )
+
+    history_aware_retriever = create_history_aware_retriever(
+        llm, retriever, contextualize_q_prompt)
+
     return qa_chain
 
 
