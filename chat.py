@@ -1,7 +1,5 @@
 import streamlit as st
-from dotenv import load_dotenv
-from langchain_openai import ChatOpenAI
-
+from controller import get_ai_message
 
 st.set_page_config(page_title="음유시인 챗봇", page_icon="📖")
 
@@ -14,15 +12,6 @@ if 'message_list' not in st.session_state:
 for message in st.session_state.message_list:
     with st.chat_message(message["role"]):
         st.write(message["content"])
-
-
-def get_ai_message(user_message):
-    load_dotenv()
-    llm = ChatOpenAI(model='gpt-4o')
-
-    response = llm.invoke(user_message)
-
-    return response.content
 
 
 if user_question := st.chat_input(placeholder="'OO을 주제로 시를 창작해줘!' 라고 말해주세요."):
