@@ -14,12 +14,14 @@ from langchain_core.runnables.history import RunnableWithMessageHistory
 store = {}
 
 
+# 세센별 채팅 기록 관리
 def get_session_history(session_id: str) -> BaseChatMessageHistory:
     if session_id not in store:
         store[session_id] = ChatMessageHistory()
     return store[session_id]
 
 
+# 벡터 검색기 설정 - 벡터 DB에서 유사한 데이터 검색
 def get_retriever():
 
     embedding = OpenAIEmbeddings(model='text-embedding-3-large')
@@ -31,11 +33,13 @@ def get_retriever():
     return retriever
 
 
+# LLM 객체 생성
 def get_llm(model='gpt-4o'):
     llm = ChatOpenAI(model=model)
     return llm
 
 
+# 키워드 추출 및 주제 설정 - 사용자 질문에서 불필요한 문장 제거 및 의미 있는 키워드 추출
 def get_dictionary_chain():
     dictionary = ["키워드를 읽고 해당 관련된 주제로 변환"]
     llm = get_llm()
@@ -51,6 +55,7 @@ def get_dictionary_chain():
     return dictionary_chain
 
 
+# 질문 재구성 및 검색 기반 답변 제공
 def get_rag_chain():
     llm = get_llm()
     retriever = get_retriever()
@@ -63,6 +68,7 @@ def get_rag_chain():
         "just reformulate it if needed and otherwise return it as is."
     )
 
+# 대화기록을 기반으로 새로운 질문을 독립적으로 재구성
     contextualize_q_prompt = ChatPromptTemplate.from_messages(
         [
             ("system", contextualize_q_system_prompt),
@@ -83,6 +89,7 @@ def get_rag_chain():
                      "{context}"
                      )
 
+# 검색된 정보를 GPT 모델이 처리하여 최종 답변 생성
     qa_prompt = ChatPromptTemplate.from_messages(
         [
             ("system", system_prompt),
@@ -106,6 +113,7 @@ def get_rag_chain():
     return conversational_rag_chain
 
 
+# 문맥과 생성 결합
 def get_ai_message(user_message):
     dictionary_chain = get_dictionary_chain()
     rag_chain = get_rag_chain()
