@@ -1,12 +1,13 @@
 import os
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder, FewShotChatMessagePromptTemplate
 from langchain_core.chat_history import BaseChatMessageHistory
 from langchain_pinecone import PineconeVectorStore
 from langchain.chains import create_history_aware_retriever, create_retrieval_chain
 from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain.chains.combine_documents import create_stuff_documents_chain
+from config import examples
 
 
 from langchain_core.runnables.history import RunnableWithMessageHistory
@@ -33,7 +34,34 @@ def get_retriever():
     return retriever
 
 
+def get_history_retriever():
+    llm = get_llm()
+    retriever = get_retriever()
+
+    contextualize_q_system_prompt = (
+        "Given a chat history and the latest user question "
+        "which might reference context in the chat history, "
+        "formulate a standalone question which can be understood "
+        "without the chat history. Do NOT answer the question, "
+        "just reformulate it if needed and otherwise return it as is."
+    )
+
+# 대화기록을 기반으로 새로운 질문을 독립적으로 재구성
+    contextualize_q_prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", contextualize_q_system_prompt),
+            MessagesPlaceholder("chat_history"),
+            ("human", "{input}")
+        ]
+    )
+
+    history_aware_retriever = create_history_aware_retriever(
+        llm, retriever, contextualize_q_prompt)
+
+    return history_aware_retriever
 # LLM 객체 생성
+
+
 def get_llm(model='gpt-4o'):
     llm = ChatOpenAI(model=model)
     return llm
@@ -58,33 +86,22 @@ def get_dictionary_chain():
 # 질문 재구성 및 검색 기반 답변 제공
 def get_rag_chain():
     llm = get_llm()
-    retriever = get_retriever()
-
-    contextualize_q_system_prompt = (
-        "Given a chat history and the latest user question "
-        "which might reference context in the chat history, "
-        "formulate a standalone question which can be understood "
-        "without the chat history. Do NOT answer the question, "
-        "just reformulate it if needed and otherwise return it as is."
-    )
-
-# 대화기록을 기반으로 새로운 질문을 독립적으로 재구성
-    contextualize_q_prompt = ChatPromptTemplate.from_messages(
+    example_prompt = ChatPromptTemplate.from_messages(
         [
-            ("system", contextualize_q_system_prompt),
-            MessagesPlaceholder("chat_history"),
-            ("human", "{input}")
+            ("human", "{input}"),
+            ("ai", "{answer}")
         ]
     )
 
-    history_aware_retriever = create_history_aware_retriever(
-        llm, retriever, contextualize_q_prompt)
+    few_shot_prompt = FewShotChatMessagePromptTemplate(
+        example_prompt=example_prompt,
+        examples=examples
+    )
 
-    system_prompt = ("You are an assistant for question-answering tasks. "
-                     "Use the following pieces of retrieved context to answer"
-                     "the question. If you don't know the answer, say that you "
-                     "don't know. Use three sentences maximum and keep the "
-                     "answer concise."
+    system_prompt = ("You are a poet. Create a poem based on the user’s keyword."
+                     "Look at the user’s keyword and create a poem."
+                     "When creating the poem, start with: ‘XX(keyword)의 주제로 창작한 시 입니다.’ in your response."
+                     "I would like a short response, about 6-7 sentences."
                      "\n\n"
                      "{context}"
                      )
@@ -93,10 +110,12 @@ def get_rag_chain():
     qa_prompt = ChatPromptTemplate.from_messages(
         [
             ("system", system_prompt),
+            few_shot_prompt,
             MessagesPlaceholder("chat_history"),
             ("human", "{input}")
         ]
     )
+    history_aware_retriever = get_history_retriever()
 
     question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
     rag_chain = create_retrieval_chain(
@@ -121,8 +140,12 @@ def get_ai_message(user_message):
     poem_chain = {"input": dictionary_chain} | rag_chain
     ai_message = poem_chain.invoke({"user_message": user_message},   config={
                                    "configurable": {"session_id": "abc123"}},)
-
     content = ai_message["input"]
     answer = ai_message["answer"]
 
-    return f"{content}\n\n 설명 : {answer}"
+    # 동일한 입력에 대해 동일한 답변을 제공하기 위해 캐시 사용
+    if user_message in store:
+        return store[user_message]
+    else:
+        store[user_message] = f"설명 : {answer}"
+        return store[user_message]
